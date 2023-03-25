@@ -11,7 +11,12 @@ fn create_dir_contents_vec(
     let mut ret_cnt_dir_file: (u32, u32) = (0, 0);
 
     let path = &mut contents.last_mut().unwrap().1;
-    let metainfo = std::fs::metadata(path_str).unwrap();
+    let metainfo = match std::fs::metadata(path_str) {
+        Ok(p) => p,
+        Err(_) => {
+            return (0, 1);
+        }
+    };
 
     // extract a name in path
     *path = extract_name(path);
