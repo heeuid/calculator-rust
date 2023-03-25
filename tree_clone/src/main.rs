@@ -2,51 +2,67 @@ fn extract_name(path: &String) -> String {
     String::from(path.split_inclusive("/").last().unwrap())
 }
 
-fn create_dir_contents_vec(
-    path_prefix: &mut String,
-    path_str: &String,
-    depth: u32,
-    contents: &mut Vec<(String, String)>,
-) -> (u32, u32) {
-    let mut ret_cnt_dir_file: (u32, u32) = (0, 0);
+enum FileType {
+    Symbolic,
+    File,
+    Directory,
+    None,
+}
 
-    let path = &mut contents.last_mut().unwrap().1;
-    let metainfo = match std::fs::metadata(path_str) {
+fn check_file_type(path: &mut String, depth: u32) -> FileType {
+    // get metadata for symbolic check
+    let metainfo_symlink = match std::fs::symlink_metadata(&path) {
         Ok(p) => p,
         Err(_) => {
-            return (0, 1);
+            return FileType::None;
         }
     };
+
+    // get metadata for file and dir check
+    let metainfo = match std::fs::metadata(&path) {
+        Ok(p) => p,
+        Err(_) => {
+            return FileType::None;
+        }
+    };
+
+    // is symbolic?
+    if metainfo_symlink.is_symlink() && depth > 0 {
+        let target_path = std::fs::read_link(&path).unwrap();
+
+        // extract a name in path
+        *path = extract_name(&path);
+
+        *path += " -> ";
+        *path += target_path.as_path().to_str().unwrap();
+
+        return FileType::Symbolic;
+    }
 
     // extract a name in path
     *path = extract_name(path);
 
     // is file?
     if metainfo.is_file() {
-        return (ret_cnt_dir_file.0, ret_cnt_dir_file.1 + 1);
+        return FileType::File;
     // or direcotry?
     } else if path.chars().last().unwrap() != '/' {
         *path += "/";
-        ret_cnt_dir_file.0 += 1;
     }
 
-    // get contents in this directory
-    let mut paths = match std::fs::read_dir(path_str) {
-        Ok(t) => t,
-        Err(_) => {
-            return ret_cnt_dir_file;
-        }
-    };
+    return FileType::Directory;
+}
 
-    let mut path_vec = Vec::<String>::new();
-    for path in &mut paths {
-        path_vec.push(String::from(path.unwrap().path().to_str().unwrap()));
-    }
-
-    path_vec.sort();
-
+fn fill_contents_vec(
+    path_prefix: &mut String,
+    path_vec: &Vec<String>,
+    contents: &mut Vec<(String, String)>,
+    depth: u32,
+) -> (u32, u32) {
+    let mut ret_cnt = (0 as u32, 0 as u32);
     let mut i = 0 as usize;
-    for path in &path_vec {
+
+    for path in path_vec {
         let prefix_last_piece: &str;
         if i == path_vec.len() - 1 {
             prefix_last_piece = "└───";
@@ -68,10 +84,10 @@ fn create_dir_contents_vec(
         }
 
         // recursive searching
-        let temp = create_dir_contents_vec(path_prefix, path, depth + 1, contents);
+        let temp_cnt = create_dir_contents_vec(path_prefix, path, depth + 1, contents);
 
-        ret_cnt_dir_file.0 += temp.0;
-        ret_cnt_dir_file.1 += temp.1;
+        ret_cnt.0 += temp_cnt.0;
+        ret_cnt.1 += temp_cnt.1;
 
         // reback to next prefix
         for _ in 0..4 {
@@ -80,6 +96,71 @@ fn create_dir_contents_vec(
 
         i += 1;
     }
+
+    ret_cnt
+}
+
+fn create_dir_contents_vec(
+    path_prefix: &mut String,
+    path_str: &String,
+    depth: u32,
+    contents: &mut Vec<(String, String)>,
+) -> (u32, u32) {
+    let mut ret_cnt_dir_file: (u32, u32) = (0, 0);
+
+    let mut last_path = &mut contents.last_mut().unwrap().1;
+
+    match check_file_type(&mut last_path, depth) {
+        FileType::Symbolic => {
+            ret_cnt_dir_file.1 += 1;
+            return ret_cnt_dir_file;
+        }
+        FileType::File => {
+            ret_cnt_dir_file.1 += 1;
+            return ret_cnt_dir_file;
+        }
+        FileType::Directory => {
+            ret_cnt_dir_file.0 += 1;
+        }
+        FileType::None => {
+            return ret_cnt_dir_file;
+        }
+    }
+
+    // flush tree from contents vector
+    if contents.len() >= 500 {
+        let tree = create_contents_tree(&contents);
+
+        if let Some(t) = tree {
+            print!("{}", t);
+        }
+        contents.clear();
+    }
+
+    // get contents in this directory
+    let mut paths = match std::fs::read_dir(path_str) {
+        Ok(t) => t,
+        Err(_) => {
+            // character device, ...
+            ret_cnt_dir_file.1 += 1;
+            return ret_cnt_dir_file;
+        }
+    };
+
+    // push files and directories in this directory into path_vec
+    let mut path_vec = Vec::<String>::new();
+    for path in &mut paths {
+        path_vec.push(String::from(path.unwrap().path().to_str().unwrap()));
+    }
+
+    path_vec.sort();
+
+    // fill contents vector with sorted path_vec
+    let temp_cnt = fill_contents_vec(path_prefix, &path_vec, contents, depth);
+
+    // count files and directories
+    ret_cnt_dir_file.0 += temp_cnt.0;
+    ret_cnt_dir_file.1 += temp_cnt.1;
 
     ret_cnt_dir_file
 }
@@ -91,10 +172,11 @@ fn create_contents_tree(contents: &Vec<(String, String)>) -> Option<String> {
         return None;
     }
 
+    tree += &contents[0].0;
     tree += &contents[0].1;
     tree += "\n";
 
-    for (prefix, path) in &contents[1..contents.len()] {
+    for (prefix, path) in contents {
         tree += prefix;
         tree += path;
         tree += "\n";
