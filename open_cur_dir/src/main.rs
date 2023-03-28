@@ -141,7 +141,7 @@ fn handle_event(
                 }
                 crossterm::event::KeyCode::Char('k') | crossterm::event::KeyCode::Up => {
                     let length = app.contents.len() as u16;
-                    app.curr_line = (app.curr_line + 1) % length;
+                    app.curr_line = (length + app.curr_line - 1) % length;
                     return Ok(EventHandle::Move);
                 }
                 _ => {}
