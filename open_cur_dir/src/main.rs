@@ -8,7 +8,7 @@ struct App {
     curr_location: String,
     curr_line: u16,
     contents: Vec<String>,
-    information: Vec<String>,
+    //information: Vec<String>,
 }
 
 impl App {
@@ -19,7 +19,7 @@ impl App {
             curr_line: 0,
 
             contents: vec![],
-            information: vec![],
+            //information: vec![],
         }
     }
 
@@ -130,19 +130,22 @@ fn handle_event(
 
     if crossterm::event::poll(timeout)? {
         match crossterm::event::read()? {
-            crossterm::event::Event::Key(key) => {
-                if let crossterm::event::KeyCode::Char('q') = key.code {
+            crossterm::event::Event::Key(key) => match key.code {
+                crossterm::event::KeyCode::Char('q') | crossterm::event::KeyCode::Esc => {
                     return Ok(EventHandle::Quit);
-                } else if let crossterm::event::KeyCode::Char('j') = key.code {
+                }
+                crossterm::event::KeyCode::Char('j') | crossterm::event::KeyCode::Down => {
                     let length = app.contents.len() as u16;
                     app.curr_line = (app.curr_line + 1) % length;
                     return Ok(EventHandle::Move);
-                } else if let crossterm::event::KeyCode::Char('k') = key.code {
+                }
+                crossterm::event::KeyCode::Char('k') | crossterm::event::KeyCode::Up => {
                     let length = app.contents.len() as u16;
-                    app.curr_line = (length + app.curr_line - 1) % length;
+                    app.curr_line = (app.curr_line + 1) % length;
                     return Ok(EventHandle::Move);
                 }
-            }
+                _ => {}
+            },
             _ => {}
         }
     }
