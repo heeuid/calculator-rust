@@ -14,7 +14,13 @@ struct App {
 impl App {
     fn new() -> Self {
         App {
-            curr_location: String::from("./"),
+            curr_location: String::from(
+                std::fs::canonicalize("./")
+                    .unwrap()
+                    .as_path()
+                    .to_str()
+                    .unwrap(),
+            ),
 
             curr_line: 0,
 
@@ -30,10 +36,15 @@ impl App {
         let mut paths = std::fs::read_dir(&self.curr_location)?;
 
         // 2) vector push: all stuffs in this location
-        self.contents.push(String::from(".."));
-        let here = std::fs::canonicalize(self.curr_location.as_str())?;
-        self.contents
-            .push(String::from(here.as_path().to_str().unwrap()));
+        if std::fs::canonicalize(&self.curr_location)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            != "/"
+        {
+            self.contents.push(String::from(".."));
+        }
+        self.contents.push(self.curr_location.clone());
         for path in &mut paths {
             let rel_path = path.unwrap().path();
             let abs_path = std::fs::canonicalize(std::path::Path::new(&rel_path))?;
@@ -95,14 +106,35 @@ fn main() -> Result<(), std::io::Error> {
     Ok(())
 }
 
+fn handle_arguments(app: &mut App, args: &Vec<String>) {
+    let mut i = 0;
+    let length = args.len();
+    while i < length {
+        let arg = &args[i];
+        if arg == "--path" && i + 1 < length {
+            i += 1;
+            let path = &args[i];
+            if let Ok(_) = std::fs::metadata(path) {
+                app.curr_location =
+                    String::from(std::fs::canonicalize(path).unwrap().to_str().unwrap());
+            }
+        }
+
+        i += 1;
+    }
+}
+
 fn run_app<B: tui::backend::Backend>(
     terminal: &mut tui::terminal::Terminal<B>,
     app: &mut App,
     tick_rate: std::time::Duration,
 ) -> Result<(), std::io::Error> {
-    let mut last_tick = std::time::Instant::now();
+    let args = std::env::args().collect();
+    handle_arguments(app, &args);
 
     app.init()?;
+
+    let mut last_tick = std::time::Instant::now();
 
     loop {
         terminal.draw(|f| ui(f, app as &App))?;
@@ -136,12 +168,15 @@ fn handle_event(
                 }
                 crossterm::event::KeyCode::Char('j') | crossterm::event::KeyCode::Down => {
                     let length = app.contents.len() as u16;
-                    app.curr_line = (app.curr_line + 1) % length;
+                    if app.curr_line != length - 1 {
+                        app.curr_line += 1;
+                    }
                     return Ok(EventHandle::Move);
                 }
                 crossterm::event::KeyCode::Char('k') | crossterm::event::KeyCode::Up => {
-                    let length = app.contents.len() as u16;
-                    app.curr_line = (length + app.curr_line - 1) % length;
+                    if app.curr_line > 0 {
+                        app.curr_line -= 1;
+                    }
                     return Ok(EventHandle::Move);
                 }
                 _ => {}

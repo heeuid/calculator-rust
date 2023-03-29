@@ -89,7 +89,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "open_cur_dir"
+name = "open_dir"
 version = "0.1.0"
 dependencies = [
  "crossterm",
