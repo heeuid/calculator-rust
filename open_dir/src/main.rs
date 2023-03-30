@@ -44,7 +44,7 @@ impl App {
         {
             self.contents.push(String::from(".."));
         }
-        self.contents.push(self.curr_location.clone());
+        //self.contents.push(self.curr_location.clone());
         for path in &mut paths {
             let rel_path = path.unwrap().path();
             let abs_path = std::fs::canonicalize(std::path::Path::new(&rel_path))?;
@@ -243,7 +243,7 @@ fn ui<B: tui::backend::Backend>(f: &mut tui::terminal::Frame<B>, app: &App) {
                 .bg(tui::style::Color::Black)
                 .fg(tui::style::Color::White),
         )
-        .block(closure_create_block("Contents"))
+        .block(closure_create_block(&app.curr_location))
         .alignment(tui::layout::Alignment::Left);
     f.render_widget(contents_paragraph, chunks[0]);
 
