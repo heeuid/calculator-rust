@@ -5,27 +5,27 @@ enum EventHandle {
 }
 
 struct App {
+    contents: Vec<String>,
     curr_location: String,
     curr_line: u16,
-    contents: Vec<String>,
+    view_line_start: u16,
     //information: Vec<String>,
 }
 
 impl App {
     fn new() -> Self {
         App {
+            contents: vec![], // contents list
             curr_location: String::from(
+                //current direction
                 std::fs::canonicalize("./")
                     .unwrap()
                     .as_path()
                     .to_str()
                     .unwrap(),
             ),
-
-            curr_line: 0,
-
-            contents: vec![],
-            //information: vec![],
+            curr_line: 0, // line (index) of contents list
+            view_line_start: 0,
         }
     }
 
@@ -138,7 +138,7 @@ fn run_app<B: tui::backend::Backend>(
     let mut last_tick = std::time::Instant::now();
 
     loop {
-        terminal.draw(|f| ui(f, app as &App))?;
+        terminal.draw(|f| ui(f, app))?;
 
         if let EventHandle::Quit = handle_event(app, &mut last_tick, &tick_rate)? {
             break;
@@ -189,7 +189,7 @@ fn handle_event(
     Ok(EventHandle::None)
 }
 
-fn ui<B: tui::backend::Backend>(f: &mut tui::terminal::Frame<B>, app: &App) {
+fn ui<B: tui::backend::Backend>(f: &mut tui::terminal::Frame<B>, app: &mut App) {
     let frame_size = f.size();
     let margin = 5 as u16;
 
@@ -224,10 +224,28 @@ fn ui<B: tui::backend::Backend>(f: &mut tui::terminal::Frame<B>, app: &App) {
     };
 
     // 4) render paragraph for contents
+
+    // calculate begining view index of contents list vector
+    let view_height = chunks[0].height - 2;
+    if app.view_line_start + view_height <= app.curr_line {
+        app.view_line_start = app.curr_line - view_height + 1;
+    } else if app.view_line_start > app.curr_line {
+        app.view_line_start = app.curr_line;
+    }
+
+    // get view index
+    let curr_i = app.curr_line as usize;
+    let start_i = app.view_line_start as usize;
+    let mut end_i = start_i + view_height as usize;
+    if end_i >= app.contents.len() {
+        end_i = app.contents.len();
+    }
+
+    // create view contents vector
     let mut i = 0 as usize;
     let mut text: Vec<tui::text::Spans> = vec![];
-    for path in &app.contents {
-        if i == app.curr_line as usize {
+    for path in &app.contents[start_i..end_i] {
+        if i == curr_i - start_i as usize {
             text.push(tui::text::Spans::from(vec![tui::text::Span::styled(
                 path.as_str(),
                 tui::style::Style::default()
@@ -239,6 +257,8 @@ fn ui<B: tui::backend::Backend>(f: &mut tui::terminal::Frame<B>, app: &App) {
         }
         i += 1;
     }
+
+    // fill view buffer of terminal (=render)
     let contents_paragraph = tui::widgets::Paragraph::new(text.clone())
         .style(
             tui::style::Style::default()
