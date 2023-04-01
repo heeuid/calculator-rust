@@ -29,22 +29,15 @@ impl App {
         }
     }
 
-    //fn extract_name(path:
-
-    fn init(&mut self) -> Result<(), std::io::Error> {
+    fn create_list_by_location(location: &String) -> Result<Vec<String>, std::io::Error> {
         // 1) get list(files, dirs) in this location
-        let mut paths = std::fs::read_dir(&self.curr_location)?;
+        let mut paths = std::fs::read_dir(location)?;
 
         // 2) vector push: all stuffs in this location
-        if std::fs::canonicalize(&self.curr_location)
-            .unwrap()
-            .to_str()
-            .unwrap()
-            != "/"
-        {
-            self.contents.push(String::from(".."));
+        let mut contents_vec = Vec::<String>::new();
+        if std::fs::canonicalize(location).unwrap().to_str().unwrap() != "/" {
+            contents_vec.push(String::from(".."));
         }
-        //self.contents.push(self.curr_location.clone());
         for path in &mut paths {
             let rel_path = path.unwrap().path();
             let abs_path = std::fs::canonicalize(std::path::Path::new(&rel_path))?;
@@ -68,10 +61,17 @@ impl App {
                 displable_name += "?";
             }
 
-            self.contents.push(displable_name);
+            contents_vec.push(displable_name);
         }
 
-        // 3) sort vector
+        Ok(contents_vec)
+    }
+
+    fn init(&mut self) -> Result<(), std::io::Error> {
+        // 1) create current location's contents list
+        self.contents = App::create_list_by_location(&self.curr_location)?;
+
+        // 2) sort vector
         let slice = &mut self.contents[2..];
         slice.sort();
 
@@ -191,6 +191,7 @@ fn handle_event(
 
 fn ui<B: tui::backend::Backend>(f: &mut tui::terminal::Frame<B>, app: &App) {
     let frame_size = f.size();
+    let margin = 5 as u16;
 
     // 1) render a frame Block (border)
     let block = tui::widgets::Block::default().style(
@@ -203,7 +204,7 @@ fn ui<B: tui::backend::Backend>(f: &mut tui::terminal::Frame<B>, app: &App) {
     // 2) layout
     let chunks = tui::layout::Layout::default()
         .direction(tui::layout::Direction::Horizontal)
-        .margin(1)
+        .margin(margin)
         .constraints([tui::layout::Constraint::Percentage(100)].as_ref())
         .split(frame_size);
 
