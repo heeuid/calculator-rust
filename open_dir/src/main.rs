@@ -54,10 +54,11 @@ impl App {
             let mut displable_name = String::from(file_name);
 
             if symlink_meta.file_type().is_symlink() {
+                let real_path = std::fs::read_link(&rel_path).unwrap();
                 displable_name = format!(
                     "{} -> {}",
                     rel_path.file_name().unwrap().to_str().unwrap(),
-                    file_name,
+                    real_path.to_str().unwrap(),
                 );
             }
 
