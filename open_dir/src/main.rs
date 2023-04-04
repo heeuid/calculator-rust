@@ -1,134 +1,11 @@
-enum FileType {
-    File,
-    Directory,
-    SymbolicFile,
-    SymbolicDirectory,
-    Other,
-}
+mod app;
 
-enum EventHandle {
+use app::*;
+
+pub enum EventHandle {
     Quit,
     Move,
     None,
-}
-
-struct App {
-    contents: Vec<(String, FileType)>,
-    curr_location: String,
-    curr_line: u16,
-    view_line_start: u16,
-    //information: Vec<String>, // TODO
-}
-
-impl App {
-    fn new() -> Self {
-        App {
-            contents: vec![], // contents list
-            curr_location: String::from(
-                //current direction
-                std::fs::canonicalize("./")
-                    .unwrap()
-                    .as_path()
-                    .to_str()
-                    .unwrap(),
-            ),
-            curr_line: 0, // line (index) of contents list
-            view_line_start: 0,
-            //information: Vec<String>, // TODO
-        }
-    }
-
-    fn create_list_by_location(
-        location: &String,
-    ) -> Result<Vec<(String, FileType)>, std::io::Error> {
-        // 1) get list(files, dirs) in this location
-        let mut paths = std::fs::read_dir(location)?;
-
-        // 2) vector push: all stuffs in this location
-        let mut contents_vec = Vec::<(String, FileType)>::new();
-        if std::fs::canonicalize(location).unwrap().to_str().unwrap() != "/" {
-            contents_vec.push((String::from(".."), FileType::Directory));
-        }
-        for path in &mut paths {
-            let rel_path = path.unwrap().path();
-            let abs_path = std::fs::canonicalize(std::path::Path::new(&rel_path))?;
-            let file_name = abs_path.file_name().unwrap().to_str().unwrap();
-            let symlink_meta = std::fs::symlink_metadata(&rel_path)?;
-
-            let mut displable_name = String::from(file_name);
-            let mut file_type = FileType::File;
-
-            if symlink_meta.file_type().is_symlink() {
-                let real_path = std::fs::read_link(&rel_path).unwrap();
-                displable_name = format!(
-                    "{} -> {}",
-                    rel_path.file_name().unwrap().to_str().unwrap(),
-                    real_path.to_str().unwrap(),
-                );
-                file_type = FileType::SymbolicFile;
-            }
-
-            if abs_path.is_dir() {
-                displable_name += "/";
-                if let FileType::SymbolicFile = file_type {
-                    file_type = FileType::SymbolicDirectory;
-                } else {
-                    file_type = FileType::Directory;
-                }
-            } else if !abs_path.is_file() {
-                displable_name += "?";
-                file_type = FileType::Other;
-            }
-
-            contents_vec.push((displable_name, file_type));
-        }
-
-        Ok(contents_vec)
-    }
-
-    fn init(&mut self) -> Result<(), std::io::Error> {
-        // 1) create current location's contents list
-        self.contents = App::create_list_by_location(&self.curr_location)?;
-
-        // 2) sort vector
-        let slice = &mut self.contents[2..];
-        slice.sort_by(|a, b| a.0.cmp(&b.0));
-
-        Ok(())
-    }
-
-    fn change_directory(&mut self) -> Result<bool, std::io::Error> {
-        let next_content = &self.contents[self.curr_line as usize];
-        let mut path = String::new();
-        let ret = match next_content.1 {
-            FileType::Directory => {
-                path = format!("{}/{}", &self.curr_location, &next_content.0);
-                Ok(true)
-            }
-            FileType::SymbolicDirectory => {
-                path = format!(
-                    "{}/{}",
-                    &self.curr_location,
-                    next_content
-                        .0
-                        .split_whitespace()
-                        .next()
-                        .unwrap()
-                        .to_string()
-                );
-                Ok(true)
-            }
-            _ => Ok(false),
-        };
-
-        if let Ok(true) = ret {
-            let abs_path = std::fs::canonicalize(std::path::Path::new(&path))?;
-            self.curr_location = String::from(abs_path.to_str().unwrap());
-            self.curr_line = 0;
-            self.view_line_start = 0;
-        }
-        ret
-    }
 }
 
 fn main() -> Result<(), std::io::Error> {
@@ -165,7 +42,9 @@ fn run_app<B: tui::backend::Backend>(
     tick_rate: std::time::Duration,
 ) -> Result<(), std::io::Error> {
     let args = std::env::args().collect();
-    handle_arguments(app, &args);
+    if !handle_arguments(app, &args) {
+        return Err(std::io::Error::from(std::io::ErrorKind::NotFound));
+    }
 
     app.init()?;
 
@@ -186,22 +65,29 @@ fn run_app<B: tui::backend::Backend>(
     Ok(())
 }
 
-fn handle_arguments(app: &mut App, args: &Vec<String>) {
+fn handle_arguments(app: &mut App, args: &Vec<String>) -> bool {
     let mut i = 0;
     let length = args.len();
     while i < length {
-        let arg = &args[i];
-        if arg == "--path" && i + 1 < length {
-            i += 1;
-            let path = &args[i];
-            if let Ok(_) = std::fs::metadata(path) {
-                app.curr_location =
-                    String::from(std::fs::canonicalize(path).unwrap().to_str().unwrap());
+        let arg = args[i].as_str();
+        match arg {
+            "--path" => {
+                if i + 1 < length {
+                    i += 1;
+                    let path = std::path::PathBuf::from(&args[i]);
+                    if path.exists() && path.is_dir() {
+                        app.curr_location = path;
+                    } else {
+                        return false;
+                    }
+                }
             }
+            _ => {}
         }
 
         i += 1;
     }
+    true
 }
 
 fn handle_event(
@@ -235,9 +121,18 @@ fn handle_event(
                 crossterm::event::KeyCode::Enter => {
                     if app.change_directory()? {
                         // 1) renew contents list with changed current location
-                        app.contents = App::create_list_by_location(&app.curr_location)?;
+                        app.contents = App::create_list_by_location(&app.curr_location).unwrap();
 
-                        // 2) display information: // TODO
+                        // 2) sort
+                        let sort_start_idx = if app.curr_location.as_os_str()
+                            == std::path::Component::RootDir.as_os_str()
+                        {
+                            0
+                        } else {
+                            1
+                        };
+                        let slice = &mut app.contents[sort_start_idx..];
+                        slice.sort_by(|a, b| a.0.cmp(&b.0));
                     }
                 }
                 _ => {}
@@ -247,6 +142,19 @@ fn handle_event(
     }
 
     Ok(EventHandle::None)
+}
+
+fn get_fg_color_by_file_type(file_type: &FileType) -> tui::style::Color {
+    match file_type {
+        FileType::File => tui::style::Color::White,
+        FileType::Directory => tui::style::Color::LightBlue,
+        FileType::SymbolicFile => tui::style::Color::LightCyan,
+        FileType::Socket => tui::style::Color::Magenta,
+        FileType::Fifo => tui::style::Color::LightMagenta,
+        FileType::BlockDevice => tui::style::Color::Yellow,
+        FileType::CharDevice => tui::style::Color::LightYellow,
+        FileType::Other => tui::style::Color::LightRed,
+    }
 }
 
 fn ui<B: tui::backend::Backend>(f: &mut tui::terminal::Frame<B>, app: &mut App) {
@@ -305,21 +213,39 @@ fn ui<B: tui::backend::Backend>(f: &mut tui::terminal::Frame<B>, app: &mut App) 
     let mut i = 0 as usize;
     let mut text: Vec<tui::text::Spans> = vec![];
     for content in &app.contents[start_i..end_i] {
-        let path = &content.0;
-        //let file_type = &content.1;
+        let fg_color = get_fg_color_by_file_type(&content.1);
+
+        // create view-text for a path
+        let path = match &content.1 {
+            FileType::SymbolicFile => {
+                let mut real_path = app.curr_location.canonicalize().unwrap();
+                real_path.push(content.0.as_str());
+                if real_path.is_symlink() {
+                    format!(
+                        "{} -> {}",
+                        &content.0,
+                        real_path.read_link().unwrap().to_str().unwrap()
+                    )
+                } else {
+                    format!("{} -> {}", &content.0, real_path.to_str().unwrap())
+                }
+            }
+            _ => content.0.clone(),
+        };
+
         if i == curr_i - start_i as usize {
             text.push(tui::text::Spans::from(vec![tui::text::Span::styled(
-                path.as_str(),
+                path,
                 tui::style::Style::default()
                     .bg(tui::style::Color::White)
                     .fg(tui::style::Color::Black),
             )]));
         } else {
             text.push(tui::text::Spans::from(vec![tui::text::Span::styled(
-                path.as_str(),
+                path,
                 tui::style::Style::default()
                     .bg(tui::style::Color::Black)
-                    .fg(tui::style::Color::White),
+                    .fg(fg_color),
             )]));
         }
 
@@ -333,7 +259,9 @@ fn ui<B: tui::backend::Backend>(f: &mut tui::terminal::Frame<B>, app: &mut App) 
                 .bg(tui::style::Color::Black)
                 .fg(tui::style::Color::White),
         )
-        .block(closure_create_block(&app.curr_location))
+        .block(closure_create_block(String::from(
+            app.curr_location.to_str().unwrap(),
+        )))
         .alignment(tui::layout::Alignment::Left);
     f.render_widget(contents_paragraph, chunks[0]);
 
