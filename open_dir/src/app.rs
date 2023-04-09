@@ -1,4 +1,3 @@
-use std::io::Write;
 use std::os::unix::fs::FileTypeExt;
 
 pub enum FileType {

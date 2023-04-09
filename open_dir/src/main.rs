@@ -76,7 +76,12 @@ fn handle_arguments(app: &mut App, args: &Vec<String>) -> bool {
                     i += 1;
                     let path = std::path::PathBuf::from(&args[i]);
                     if path.exists() && path.is_dir() {
-                        app.curr_location = path;
+                        app.curr_location = match path.canonicalize() {
+                            Ok(ap) => ap,
+                            Err(_) => {
+                                return false;
+                            }
+                        };
                     } else {
                         return false;
                     }
