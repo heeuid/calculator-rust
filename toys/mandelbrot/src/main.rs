@@ -49,33 +49,42 @@ fn escape_time(c: Complex<f64>, limit: usize) -> Option<usize> {
 fn render(bound: (u32, u32), ul: &Complex<f64>, lr: &Complex<f64>, threads: u8) -> Vec<u8> {
     let (width, height) = bound;
     let mut image: Vec<u8> = vec![0; (width * height) as usize];
+    let chunk_cnt = {
+        let mut temp = width * height / threads as u32;
+        if temp == 0 {
+            temp = 1;
+        }
+        temp
+    } as usize;
+    let mut image_chunks: Vec<&mut [u8]> = image
+        .chunks_mut(chunk_cnt)
+        .collect();
 
-    let chunk_len = height / threads as u32;
+    std::thread::scope(|spawner| {
+        let mut starting_pixel_idx = 0;
 
-    for i in 0..threads as u32 {
-        std::thread::scope(|spawner| {
-            spawner.spawn(|| {
-                let row_start = i * chunk_len;
-                let row_end = row_start
-                    + chunk_len
-                    + if i == threads as u32 - 1 {
-                        height % threads as u32
-                    } else {
-                        0
+        for chunk in image_chunks.iter_mut() {
+            let chunk_len = chunk.len();
+
+            spawner.spawn(move || {
+                for (pixel_relative_i, pixel_relative) in chunk.iter_mut().enumerate() {
+                    let curr_pixel_idx = starting_pixel_idx + pixel_relative_i;
+                    let row = curr_pixel_idx as u32 / width;
+                    let col = curr_pixel_idx as u32 % width;
+
+                    let c = pixel_to_complex((col, row), bound, ul, lr);
+                    let num = match escape_time(c, 255) {
+                        Some(cnt) => (255 - cnt) as u8,
+                        None => 0,
                     };
-                for row in row_start..row_end {
-                    for col in 0..width {
-                        let c = pixel_to_complex((col, row), bound, ul, lr);
-                        let num = match escape_time(c, 255) {
-                            Some(cnt) => (255 - cnt) as u8,
-                            None => 0,
-                        };
-                        image[(row * width + col) as usize] = num;
-                    }
+
+                    *pixel_relative = num;
                 }
             });
-        });
-    }
+
+            starting_pixel_idx += chunk_len;
+        }
+    });
 
     image
 }
@@ -158,7 +167,7 @@ fn main() -> Result<()> {
         std::process::exit(1);
     }
 
-    let image = render(bound, &upper_left, &lower_right, 10);
+    let image = render(bound, &upper_left, &lower_right, 100);
 
     let file =
         File::create(filename).with_context(|| format!("Failed to open/create {}", filename))?;
