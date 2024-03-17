@@ -2,7 +2,7 @@ use clap::Parser;
 use color_eyre::eyre::Result;
 use std::{
     fs::File,
-    io::{self, BufRead, Write},
+    io::{self, Write, Read},
     path::Path,
 };
 
@@ -21,9 +21,15 @@ struct Args {
     end: bool,
 
     /// Non-printable ascii to printable ascii except for TAB & LINEFEED
-    /// e.g. \r to ^M
-    #[arg(short, long, default_value_t = false, verbatim_doc_comment)]
-    verbal: bool,
+    /// non-printable ascii: 0~8 11~31 127 128~255
+    /// 1) ch = 0~8 11~31 127: ^((ch + 1) % 128 + 63)
+    ///    e.g. 8 => ^(72) = ^H
+    /// 2) ch = 128~159 255: M-^(((ch - 128) + 1) % 128 + 63)
+    ///    e.g. 136 => M-^(72) = M-^H
+    /// 3) ch = 160~254: M-(ch - 128)
+    ///    e.g. 193 => M-A
+    #[arg(short = 'v', long, default_value_t = false, verbatim_doc_comment)]
+    show_nonprinting: bool,
 
     /// Print line numbers
     #[arg(short, long, default_value_t = false, verbatim_doc_comment)]
@@ -39,18 +45,36 @@ struct Info {
     line_num: u32,
 }
 
-fn replace_non_printables(args: &Args, line: &str) -> String {
+fn replace_non_printables(args: &Args, line: &[u8]) -> String {
     let mut output = String::new();
 
-    for b in line.as_bytes() {
-        match b {
-            0..=8 | 11..=31 => {
-                output.push('^');
-                output.push((b + 65) as char);
-            }
+    for b in line {
+        match *b {
             9 if args.tab => output.push_str("^I"),
             10 if args.end => output.push_str("$\n"),
-            127 => output.push_str("^?"),
+            0..=8 | 11..=31 | 127 => {
+                if args.show_nonprinting {
+                    output.push('^');
+                    output.push(((*b + 1) % 128 + 63) as char);
+                }
+            }
+            128..=255 => {
+                if args.show_nonprinting {
+                    let byte = *b - 128;
+                    output.push_str("M-");
+                    match byte {
+                        0..=31 | 127 => {
+                            if args.show_nonprinting {
+                                output.push('^');
+                                output.push(((byte + 1) % 128 + 63) as char);
+                            }
+                        }
+                        _ => {
+                            output.push(byte as char);
+                        }
+                    }
+                }
+            } 
             _ => output.push(*b as char),
         }
     }
@@ -58,7 +82,7 @@ fn replace_non_printables(args: &Args, line: &str) -> String {
     output
 }
 
-fn change_form(args: &Args, info: &mut Info, line: &str) -> String {
+fn change_form(args: &Args, info: &mut Info, line: &[u8]) -> String {
     let output = replace_non_printables(args, line);
 
     if args.num {
@@ -70,18 +94,18 @@ fn change_form(args: &Args, info: &mut Info, line: &str) -> String {
     }
 }
 
-fn print_line(args: &Args, info: &mut Info, line: &str) -> Result<()> {
+fn print_bytes(args: &Args, info: &mut Info, data: &[u8]) -> Result<()> {
     let mut ioout = io::stdout();
-    let output = change_form(args, info, line);
+    let output = change_form(args, info, data);
     ioout.write_all(output.as_bytes())?;
     Ok(())
 }
 
 fn _print_file(args: &Args, info: &mut Info, path: &Path) -> Result<()> {
+    let mut data = vec![];
     let file = File::open(path)?;
-    for line in io::BufReader::new(file).lines() {
-        print_line(args, info, &line?)?;
-    }
+    io::BufReader::new(file).read_to_end(&mut data)?;
+    print_bytes(args, info, &data)?;
     Ok(())
 }
 
@@ -96,7 +120,7 @@ fn _print_stdin(args: &Args, info: &mut Info) -> Result<()> {
     let ioin = io::stdin();
     loop {
         ioin.read_line(&mut input)?;
-        print_line(args, info, input.as_str())?;
+        print_bytes(args, info, input.as_bytes())?;
         input.clear();
     }
 }
