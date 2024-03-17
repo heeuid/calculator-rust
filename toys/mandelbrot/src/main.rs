@@ -56,14 +56,14 @@ fn render(bound: (u32, u32), ul: &Complex<f64>, lr: &Complex<f64>, threads: u8) 
         }
         temp
     } as usize;
-    let mut image_chunks: Vec<&mut [u8]> = image
+    let image_chunks: Vec<&mut [u8]> = image
         .chunks_mut(chunk_cnt)
         .collect();
 
     std::thread::scope(|spawner| {
         let mut starting_pixel_idx = 0;
 
-        for chunk in image_chunks.iter_mut() {
+        for chunk in image_chunks.into_iter() {
             let chunk_len = chunk.len();
 
             spawner.spawn(move || {
