@@ -1,6 +1,7 @@
 mod app;
 
 use app::*;
+use crossterm::{event, execute, terminal};
 
 pub enum EventHandle {
     Quit,
@@ -9,13 +10,13 @@ pub enum EventHandle {
 }
 
 fn main() -> Result<(), std::io::Error> {
-    crossterm::terminal::enable_raw_mode()?;
+    terminal::enable_raw_mode()?;
 
     let mut stdout = std::io::stdout();
-    crossterm::execute!(
+    execute!(
         stdout,
-        crossterm::terminal::EnterAlternateScreen,
-        crossterm::event::EnableMouseCapture,
+        terminal::EnterAlternateScreen,
+        event::EnableMouseCapture,
     )?;
 
     let backend = tui::backend::CrosstermBackend::new(stdout);
@@ -26,12 +27,15 @@ fn main() -> Result<(), std::io::Error> {
 
     run_app(&mut terminal, &mut app, tick_rate)?;
 
-    crossterm::terminal::disable_raw_mode()?;
-    crossterm::execute!(
+    terminal::disable_raw_mode()?;
+    execute!(
         terminal.backend_mut(),
-        crossterm::terminal::LeaveAlternateScreen,
-        crossterm::event::DisableMouseCapture,
+        terminal::LeaveAlternateScreen,
+        event::DisableMouseCapture,
     )?;
+
+    let path = app.curr_location;
+    println!("{}", path.to_str().unwrap());
 
     Ok(())
 }
@@ -41,7 +45,7 @@ fn run_app<B: tui::backend::Backend>(
     app: &mut App,
     tick_rate: std::time::Duration,
 ) -> Result<(), std::io::Error> {
-    let args = std::env::args().collect();
+    let args: Vec<String> = std::env::args().collect();
     if !handle_arguments(app, &args) {
         return Err(std::io::Error::from(std::io::ErrorKind::NotFound));
     }
@@ -65,29 +69,24 @@ fn run_app<B: tui::backend::Backend>(
     Ok(())
 }
 
-fn handle_arguments(app: &mut App, args: &Vec<String>) -> bool {
+fn handle_arguments(app: &mut App, args: &[String]) -> bool {
     let mut i = 0;
     let length = args.len();
     while i < length {
         let arg = args[i].as_str();
-        match arg {
-            "--path" => {
-                if i + 1 < length {
-                    i += 1;
-                    let path = std::path::PathBuf::from(&args[i]);
-                    if path.exists() && path.is_dir() {
-                        app.curr_location = match path.canonicalize() {
-                            Ok(ap) => ap,
-                            Err(_) => {
-                                return false;
-                            }
-                        };
-                    } else {
+        if arg == "--path" && i + 1 < length {
+            i += 1;
+            let path = std::path::PathBuf::from(&args[i]);
+            if path.exists() && path.is_dir() {
+                app.curr_location = match path.canonicalize() {
+                    Ok(ap) => ap,
+                    Err(_) => {
                         return false;
                     }
-                }
+                };
+            } else {
+                return false;
             }
-            _ => {}
         }
 
         i += 1;
@@ -104,26 +103,43 @@ fn handle_event(
         .checked_sub(last_tick.elapsed())
         .unwrap_or_else(|| std::time::Duration::from_secs(0));
 
-    if crossterm::event::poll(timeout)? {
-        match crossterm::event::read()? {
-            crossterm::event::Event::Key(key) => match key.code {
-                crossterm::event::KeyCode::Char('q') | crossterm::event::KeyCode::Esc => {
+    if event::poll(timeout)? {
+        if let event::Event::Key(key) = event::read()? {
+            match key.code {
+                event::KeyCode::Char('q') | event::KeyCode::Esc => {
                     return Ok(EventHandle::Quit);
                 }
-                crossterm::event::KeyCode::Char('j') | crossterm::event::KeyCode::Down => {
+                event::KeyCode::Char('j') | event::KeyCode::Down => {
                     let length = app.contents.len() as u16;
                     if app.curr_line != length - 1 {
                         app.curr_line += 1;
                     }
                     return Ok(EventHandle::Move);
                 }
-                crossterm::event::KeyCode::Char('k') | crossterm::event::KeyCode::Up => {
+                event::KeyCode::Char('k') | event::KeyCode::Up => {
                     if app.curr_line > 0 {
                         app.curr_line -= 1;
                     }
                     return Ok(EventHandle::Move);
                 }
-                crossterm::event::KeyCode::Enter => {
+                event::KeyCode::Left | event::KeyCode::Char('h') | event::KeyCode::Backspace => {
+                    app.curr_location.pop();
+
+                    // 1) renew contents list with changed current location
+                    app.contents = App::create_list_by_location(&app.curr_location).unwrap();
+
+                    // 2) sort
+                    let sort_start_idx = if app.curr_location.as_os_str()
+                        == std::path::Component::RootDir.as_os_str()
+                    {
+                        0
+                    } else {
+                        1
+                    };
+                    let slice = &mut app.contents[sort_start_idx..];
+                    slice.sort_by(|a, b| a.0.cmp(&b.0));
+                }
+                event::KeyCode::Right | event::KeyCode::Char('l') | event::KeyCode::Enter => {
                     if app.change_directory()? {
                         // 1) renew contents list with changed current location
                         app.contents = App::create_list_by_location(&app.curr_location).unwrap();
@@ -141,8 +157,7 @@ fn handle_event(
                     }
                 }
                 _ => {}
-            },
-            _ => {}
+            }
         }
     }
 
@@ -164,7 +179,7 @@ fn get_fg_color_by_file_type(file_type: &FileType) -> tui::style::Color {
 
 fn ui<B: tui::backend::Backend>(f: &mut tui::terminal::Frame<B>, app: &mut App) {
     let frame_size = f.size();
-    let margin = 5 as u16;
+    let margin = 5;
 
     // 1) render a frame Block (border)
     let block = tui::widgets::Block::default().style(
@@ -215,9 +230,8 @@ fn ui<B: tui::backend::Backend>(f: &mut tui::terminal::Frame<B>, app: &mut App) 
     }
 
     // create view contents vector
-    let mut i = 0 as usize;
     let mut text: Vec<tui::text::Spans> = vec![];
-    for content in &app.contents[start_i..end_i] {
+    for (i, content) in app.contents[start_i..end_i].iter().enumerate() {
         let fg_color = get_fg_color_by_file_type(&content.1);
 
         // create view-text for a path
@@ -238,7 +252,7 @@ fn ui<B: tui::backend::Backend>(f: &mut tui::terminal::Frame<B>, app: &mut App) 
             _ => content.0.clone(),
         };
 
-        if i == curr_i - start_i as usize {
+        if i == curr_i - start_i {
             text.push(tui::text::Spans::from(vec![tui::text::Span::styled(
                 path,
                 tui::style::Style::default()
@@ -253,8 +267,6 @@ fn ui<B: tui::backend::Backend>(f: &mut tui::terminal::Frame<B>, app: &mut App) 
                     .fg(fg_color),
             )]));
         }
-
-        i += 1;
     }
 
     // fill view buffer of terminal (=render)

@@ -51,7 +51,7 @@ impl App {
     }
 
     pub fn create_list_by_location(
-        location: &std::path::PathBuf,
+        location: &std::path::Path,
     ) -> Result<Vec<(String, FileType)>, std::io::Error> {
         // 1) get conents list of this location
         let mut paths = location.read_dir().unwrap();
