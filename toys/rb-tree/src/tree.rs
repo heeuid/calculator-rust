@@ -344,6 +344,52 @@ impl<T: PartialOrd + Debug> RBTree<T> {
         }
     }
 
+    fn _find_node(
+        current_node: Rc<RefCell<RBTreeNode<T>>>,
+        data: &T,
+    ) -> Option<Rc<RefCell<RBTreeNode<T>>>> {
+        match &current_node.borrow().data.partial_cmp(data) {
+            Some(res) => match res {
+                Ordering::Greater => {
+                    if let Some(lchild) = &current_node.borrow().lchild {
+                        Self::_find_node(lchild.clone(), data)
+                    } else {
+                        None
+                    }
+                }
+                Ordering::Less => {
+                    if let Some(rchild) = &current_node.borrow().rchild {
+                        Self::_find_node(rchild.clone(), data)
+                    } else {
+                        None
+                    }
+                }
+                Ordering::Equal => Some(current_node.clone()),
+            },
+            None => None,
+        }
+    }
+
+    fn find_node(&self, data: &T) -> Option<Rc<RefCell<RBTreeNode<T>>>> {
+        if let Some(root) = &self.root {
+            Self::_find_node(root.clone(), data)
+        } else {
+            None
+        }
+    }
+
+    fn find_successor(&self, node: Rc<RefCell<RBTreeNode<T>>>) -> Option<Rc<RefCell<RBTreeNode<T>>>> {
+        if let Some(rchild) = &node.borrow().rchild {
+            let mut current_node = rchild.clone();
+            while let Some(lchild) = current_node.clone().borrow().lchild.clone() {
+                current_node = lchild;
+            }
+            Some(current_node)
+        } else {
+            None
+        }
+    }
+
     fn _check(
         node: Rc<RefCell<RBTreeNode<T>>>,
         blacks: u32,
@@ -449,5 +495,46 @@ mod test {
         assert!(is_rbt);
         assert!(blacks <= min_depth);
         assert!(blacks * 2 >= max_depth);
+    }
+    #[test]
+    fn find_test() {
+        let mut rbt = RBTree::<u64>::new();
+        let mut rng = rand::thread_rng();
+        let (min, max) = (0, 1000000);
+        let mut nums: Vec<u64> = (min..max).collect();
+        nums.shuffle(&mut rng);
+        for n in &nums {
+            rbt.insert(*n);
+        }
+        let num = nums[rng.gen_range(0..max - min) as usize];
+        let test_result = if let Some(found) = rbt.find_node(&num) {
+            num == found.borrow().data
+        } else {
+            false
+        };
+        assert!(test_result);
+    }
+    #[test]
+    fn find_successor_test() {
+        let mut rbt = RBTree::<u64>::new();
+        for n in 0..20 {
+            rbt.insert(n);
+        }
+
+        let num = 11;
+        let found_node = rbt.find_node(&num);
+        let test_result = if let Some(found) = &found_node {
+            num == found.borrow().data
+        } else {
+            false
+        };
+        assert!(test_result);
+
+        let test_result = if let Some(found) = rbt.find_successor(found_node.unwrap()) {
+            found.borrow().data == 12
+        } else {
+            false
+        };
+        assert!(test_result);
     }
 }
