@@ -198,11 +198,7 @@ impl<T: PartialOrd + Debug> RBTree<T> {
 
         // P<--C
         if let Some(lc) = &lchild_of_node {
-            unsafe {
-                let lc_inner = lc.as_ptr();
-                (*lc_inner).parent = Some(parent.clone());
-            }
-            //(*lc).borrow_mut().parent = Some(parent.clone());
+            (*lc).borrow_mut().parent = Some(parent.clone());
         }
 
         // GP<-->X
@@ -236,11 +232,7 @@ impl<T: PartialOrd + Debug> RBTree<T> {
 
         // P<--C
         if let Some(rc) = &rchild_of_node {
-            unsafe {
-                let rc_inner = rc.as_ptr();
-                (*rc_inner).parent = Some(parent.clone());
-            }
-            // (*rc).borrow_mut().parent = Some(parent.clone());
+            (*rc).borrow_mut().parent = Some(parent.clone());
         }
 
         // GP<-->X
@@ -284,7 +276,8 @@ impl<T: PartialOrd + Debug> RBTree<T> {
                 }
                 if let Some(p) = parent {
                     (*p).borrow_mut().color = Color::Black;
-                    if let Some(gp) = (*p).borrow().parent.clone() {
+                    let pp = (*p).borrow().parent.clone();
+                    if let Some(gp) = pp {
                         (*gp).borrow_mut().color = Color::Red;
                         self.fix_insert(gp.clone());
                     }
