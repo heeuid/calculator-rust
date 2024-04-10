@@ -14,6 +14,7 @@ enum Color {
 
 struct RBTreeNode<T: PartialOrd + Debug> {
     data: T,
+    cnt: usize,
     color: Color,
     parent: Option<Rc<RefCell<RBTreeNode<T>>>>,
     lchild: Option<Rc<RefCell<RBTreeNode<T>>>>,
@@ -55,6 +56,7 @@ impl<T: PartialOrd + Debug> RBTreeNode<T> {
     pub fn new(data: T) -> RBTreeNode<T> {
         RBTreeNode {
             data,
+            cnt: 1,
             color: Color::Red,
             parent: None,
             lchild: None,
@@ -141,7 +143,7 @@ impl<T: PartialOrd + Debug> RBTreeNode<T> {
 
 pub struct RBTree<T: PartialOrd + Debug> {
     root: Option<Rc<RefCell<RBTreeNode<T>>>>,
-    cnt: u32,
+    cnt: usize,
 }
 
 impl<T: PartialOrd + Debug> Debug for RBTree<T> {
@@ -164,7 +166,7 @@ impl<T: PartialOrd + Debug> RBTree<T> {
         RBTree { root: None, cnt: 0 }
     }
 
-    pub fn len(&self) -> u32 {
+    pub fn len(&self) -> usize {
         self.cnt
     }
 
@@ -193,7 +195,9 @@ impl<T: PartialOrd + Debug> RBTree<T> {
                     Ordering::Less => c = current_borrowed.lchild.clone(),
                     Ordering::Greater => c = current_borrowed.rchild.clone(),
                     Ordering::Equal => {
-                        return false;
+                        current_borrowed.cnt += 1;
+                        self.cnt += 1;
+                        return true;
                     }
                 },
                 None => return false,
@@ -227,6 +231,13 @@ impl<T: PartialOrd + Debug> RBTree<T> {
     pub fn delete(&mut self, data: &T) -> bool {
         let found = self.find_node(data);
         if let Some(found_node) = found.clone() {
+            let cnt = found_node.borrow().cnt;
+            if cnt > 1 {
+                found_node.borrow_mut().cnt -= 1;
+                self.cnt -= 1;
+                return true;
+            }
+
             // println!("delete({:?})", found_node.borrow().data);
             let found_node_color = found_node.borrow().color;
 
@@ -891,8 +902,10 @@ mod test {
         }
         for (i, n) in nums.iter().enumerate() {
             rbt.delete(n);
-            println!("{}: delete {}", i, n);
             let (is_rbt, _, _, _) = rbt.check();
+            if !is_rbt {
+                println!("{}: delete {}", i, n);
+            }
             assert!(is_rbt);
         }
         let (is_rbt, blacks, min_depth, max_depth) = rbt.check();
@@ -932,6 +945,40 @@ mod test {
             assert!(blacks * 2 >= max_depth);
         }
         assert!(rbt.cnt == insert_cnt - delete_cnt);
+    }
+    #[test]
+    fn insert_delete_dup_test() {
+        let mut rbt = RBTree::<f64>::new();
+        let mut rng = rand::thread_rng();
+        let mut nums: Vec<f64> = vec![];
+        for _ in 0..10000 {
+            nums.push(rng.gen());
+        }
+        nums.shuffle(&mut rng);
+        for n in &nums {
+            rbt.insert(*n);
+        }
+        for n in &nums {
+            rbt.insert(*n);
+        }
+
+        assert!(rbt.len() == nums.len() * 2);
+        println!("rbt({}), nums({})", rbt.len(), nums.len());
+
+        for n in &nums {
+            rbt.delete(n);
+            let (is_rbt, blacks, min_depth, max_depth) = rbt.check();
+            assert!(is_rbt);
+            assert!(blacks <= min_depth);
+            assert!(blacks * 2 >= max_depth);
+        }
+        for n in &nums {
+            rbt.delete(n);
+            let (is_rbt, blacks, min_depth, max_depth) = rbt.check();
+            assert!(is_rbt);
+            assert!(blacks <= min_depth);
+            assert!(blacks * 2 >= max_depth);
+        }
     }
     // #[test]
     // fn delete_custom_test() {
